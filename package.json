@@ -1,0 +1,19 @@
+{
+  "name": "brainrot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.6.4",
+  "type": "module",
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "fluent-ffmpeg": "^2.1.3",
+    "openai": "^4.91.1"
+  }
+}
