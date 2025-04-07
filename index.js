@@ -6,7 +6,7 @@ dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { exec } from 'child_process';
+import { spawn } from 'child_process';
 import ffmpeg from 'fluent-ffmpeg';
 import OpenAI from 'openai';
 
@@ -36,12 +36,12 @@ const openai = new OpenAI({
 async function getTextFromStudyMaterial() {
     try {
         const material = fs.readFileSync(STUDY_MATERIAL_PATH, 'utf8');
-        const prompt = `Jsi odborný copywriter specializující se na tvorbu textů pro voice-over videa. Na základě následujícího studijního materiálu vytvoř krátký, plynulý a zábavný text v češtině, který bude použit jako hlasový komentář ve videu. Ujisti se, že pokryješ všechny důležité informace obsažené ve studijním materiálu. Text by měl být informativní, poutavý a snadno srozumitelný, bez jakýchkoliv slangových výrazů.
+        const prompt = `Jsi odborný copywriter specializující se na tvorbu textů pro voice-over videa. Na základě následujícího studijního materiálu vytvoř krátký, plynulý a zábavný text v češtině, který bude použit jako hlasový komentář ve videu. Ujisti se, že pokryješ všechny důležité informace obsažené ve studijním materiálu. Text by měl být informativní, poutavý a snadno srozumitelný. DŮLEŽITÉ: Prosím, piš všechna čísla slovy a nepoužívej číselné zápisy ani ordinal markery (např. místo "1." použij "první").
 
-Studijní materiál:
-${material}
-
-Výstup:`;
+    Studijní materiál:
+    ${material}
+    
+    Výstup:`;
 
         const response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
@@ -62,55 +62,97 @@ Výstup:`;
     }
 }
 
-// Step 2: Convert the text into speech using Coqui TTS
 async function generateVoice(text) {
     return new Promise((resolve, reject) => {
-        // IMPORTANT:
-        // - Ensure Coqui TTS is installed (https://github.com/coqui-ai/TTS)
-        // - Replace <czech-model-path> with the actual path to your Czech-supported model.
-        const command = `tts --text "${text.replace(
-            /"/g,
-            '\\"'
-        )}" --model_name tts_models/cs/cv/vits --out_path ${OUTPUT_AUDIO}`;
-        console.log('Executing command:', command);
-        exec(command, (error, stdout, stderr) => {
-            if (error) {
-                console.error('Error generating TTS audio:', error);
-                return reject(error);
+        const args = [
+            '--text',
+            text.replace(/\n/g, ' '),
+            '--model_name',
+            'tts_models/multilingual/multi-dataset/xtts_v2',
+            '--language_idx',
+            'cs',
+            '--speaker_idx',
+            'Viktor Menelaos',
+            '--out_path',
+            OUTPUT_AUDIO,
+        ];
+        console.log('Executing command: tts ' + args.join(' '));
+
+        // Set environment variables for Czech UTF-8 encoding
+        const spawnOptions = {
+            env: { ...process.env, LC_ALL: 'cs_CZ.UTF-8', LANG: 'cs_CZ.UTF-8' },
+        };
+
+        const ttsProcess = spawn('tts', args, spawnOptions);
+
+        let stdoutData = '';
+        let stderrData = '';
+
+        ttsProcess.stdout.on('data', (data) => {
+            stdoutData += data.toString();
+        });
+
+        ttsProcess.stderr.on('data', (data) => {
+            stderrData += data.toString();
+        });
+
+        ttsProcess.on('close', (code) => {
+            if (code !== 0) {
+                console.error('Error generating TTS audio. Exit code:', code);
+                console.error(stderrData);
+                return reject(new Error(`TTS process exited with code: ${code}`));
             }
-            console.log('TTS generation stdout:', stdout);
-            console.log('TTS generation stderr:', stderr);
+            console.log('TTS generation stdout:', stdoutData);
+            console.log('TTS generation stderr:', stderrData);
             resolve();
         });
     });
 }
 
-// Step 3: Create subtitles file with timing for the voice-over text
-function generateSubtitles(text) {
-    // Splits the text into sentences and assigns dummy timings.
-    const sentences = text.split('.').filter((s) => s.trim() !== '');
-    let srtContent = '';
-    let startTime = 0;
-    const dummyDuration = 3000; // 3 seconds per sentence (dummy value)
+// Helper: Format seconds into SRT time format "HH:MM:SS,mmm"
+function formatTime(seconds) {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds - Math.floor(seconds)) * 1000);
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(
+        ms
+    ).padStart(3, '0')}`;
+}
 
-    sentences.forEach((sentence, index) => {
-        const endTime = startTime + dummyDuration;
-        // Format time in SRT (HH:MM:SS,ms)
-        const formatTime = (ms) => {
-            const date = new Date(ms);
-            return date.toISOString().substr(11, 12).replace('.', ',');
-        };
-        srtContent += `${index + 1}\n${formatTime(startTime)} --> ${formatTime(endTime)}\n${sentence.trim()}\n\n`;
-        startTime = endTime;
-    });
+// Step 3: Generate subtitles using OpenAI Whisper (transcription)
+async function generateSubtitles() {
+    try {
+        // Use OpenAI Whisper transcription API to transcribe the generated audio.
+        const transcription = await openai.audio.transcriptions.create({
+            file: fs.createReadStream(OUTPUT_AUDIO),
+            model: 'whisper-1',
+            response_format: 'verbose_json',
+        });
 
-    fs.writeFileSync(OUTPUT_SUBTITLES, srtContent, 'utf8');
-    console.log('Subtitles generated at:', OUTPUT_SUBTITLES);
+        const segments = transcription.segments;
+        if (!segments || segments.length === 0) {
+            throw new Error('No transcription segments were returned.');
+        }
+
+        let srtContent = '';
+        segments.forEach((segment, index) => {
+            const startStr = formatTime(segment.start);
+            const endStr = formatTime(segment.end);
+            const text = segment.text.trim();
+            srtContent += `${index + 1}\n${startStr} --> ${endStr}\n${text}\n\n`;
+        });
+
+        fs.writeFileSync(OUTPUT_SUBTITLES, srtContent, 'utf8');
+        console.log('Subtitles generated at:', OUTPUT_SUBTITLES);
+    } catch (err) {
+        console.error('Error generating subtitles using Whisper:', err);
+        throw err;
+    }
 }
 
 // Step 4: Merge gameplay video, generated voice, and subtitles using ffmpeg
 function createFinalVideo() {
-    // For this example, we take the first video in the 'videos' folder
     const videoFiles = fs.readdirSync(VIDEOS_FOLDER).filter((file) => file.endsWith('.mp4'));
     if (videoFiles.length === 0) {
         console.error('No video files found in videos folder.');
@@ -118,7 +160,6 @@ function createFinalVideo() {
     }
     const inputVideoPath = path.join(VIDEOS_FOLDER, videoFiles[0]);
 
-    // Overlay the subtitles and add the generated audio.
     ffmpeg(inputVideoPath)
         .outputOptions('-vf', `subtitles=${OUTPUT_SUBTITLES}`)
         .input(OUTPUT_AUDIO)
@@ -137,16 +178,19 @@ async function main() {
     const studyText = await getTextFromStudyMaterial();
     if (!studyText) return;
 
-    return;
-
     try {
         await generateVoice(studyText);
     } catch (error) {
         console.error('Failed to generate voice:', error);
         return;
     }
-    generateSubtitles(studyText);
-    // Create the final video (after voice audio has been generated)
+    try {
+        await generateSubtitles();
+    } catch (error) {
+        console.error('Failed to generate subtitles:', error);
+        return;
+    }
+    return;
     createFinalVideo();
 }
 
