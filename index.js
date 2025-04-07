@@ -70,50 +70,20 @@ async function getTextFromStudyMaterial() {
 }
 
 async function generateVoice(text) {
-    return new Promise((resolve, reject) => {
-        const args = [
-            '--text',
-            text,
-            '--model_name',
-            'tts_models/multilingual/multi-dataset/xtts_v2',
-            '--language_idx',
-            'cs',
-            '--speaker_wav',
-            'babis.wav',
-            '--out_path',
-            OUTPUT_AUDIO,
-        ];
-        console.log('Executing command: tts ' + args.join(' '));
-
-        // Set environment variables for Czech UTF-8 encoding
-        const spawnOptions = {
-            env: { ...process.env, LC_ALL: 'cs_CZ.UTF-8', LANG: 'cs_CZ.UTF-8' },
-        };
-
-        const ttsProcess = spawn('tts', args, spawnOptions);
-
-        let stdoutData = '';
-        let stderrData = '';
-
-        ttsProcess.stdout.on('data', (data) => {
-            stdoutData += data.toString();
+    try {
+        const mp3 = await openai.audio.speech.create({
+            model: 'gpt-4o-mini-tts',
+            voice: 'coral',
+            input: text,
+            instructions: 'Speak in a natural and clear Czech tone.',
         });
-
-        ttsProcess.stderr.on('data', (data) => {
-            stderrData += data.toString();
-        });
-
-        ttsProcess.on('close', (code) => {
-            if (code !== 0) {
-                console.error('Error generating TTS audio. Exit code:', code);
-                console.error(stderrData);
-                return reject(new Error(`TTS process exited with code: ${code}`));
-            }
-            console.log('TTS generation stdout:', stdoutData);
-            console.log('TTS generation stderr:', stderrData);
-            resolve();
-        });
-    });
+        const buffer = Buffer.from(await mp3.arrayBuffer());
+        await fs.promises.writeFile(OUTPUT_AUDIO, buffer);
+        console.log('TTS audio generated and saved at', OUTPUT_AUDIO);
+    } catch (error) {
+        console.error('Error generating TTS audio:', error);
+        throw error;
+    }
 }
 
 // Helper: Format seconds into SRT time format "HH:MM:SS,mmm"
@@ -127,8 +97,7 @@ function formatTime(seconds) {
     ).padStart(3, '0')}`;
 }
 
-// Step 3: Generate subtitles using OpenAI Whisper (transcription) and split into smaller chunks.
-async function generateSubtitles() {
+async function generateSubtitles(originalVoiceoverText) {
     try {
         // Use OpenAI Whisper transcription API to transcribe the generated audio.
         const transcription = await openai.audio.transcriptions.create({
@@ -173,10 +142,36 @@ async function generateSubtitles() {
             }
         });
 
-        fs.writeFileSync(OUTPUT_SUBTITLES, srtContent, 'utf8');
+        console.log('Initial generated subtitles:\n', srtContent);
+
+        // Use ChatGPT to fix nonsensical words, typos, and mistakes.
+        // The prompt compares the original voiceover text with the transcribed subtitles.
+        const fixPrompt = `Jsi expert na korektury a úpravy titulků. Níže najdeš původní text, který byl použit pro generování hlasového komentáře, a automaticky transkribované titulky, které mohou obsahovat chyby, nesmyslná slova nebo překlepy. Prosím oprav titulky tak, aby odpovídaly původnímu textu a byly jazykově správné, ale zachovej původní indexy a časové značky ve formátu SRT.
+
+Původní text pro hlasový komentář:
+${originalVoiceoverText}
+
+Automaticky generované titulky:
+${srtContent}
+
+Odpověz pouze výstupem v platném SRT formátu. Tvůj výstup musí být pouze opravený text SRT titulků. Opravené titulky (výstup v platném SRT formátu):`;
+
+        const fixResponse = await openai.chat.completions.create({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'Jsi odborný editor titulků.' },
+                { role: 'user', content: fixPrompt },
+            ],
+            max_tokens: 10000,
+        });
+
+        const correctedSrt = fixResponse.choices[0].message.content.trim();
+        console.log('Corrected subtitles from ChatGPT:\n', correctedSrt);
+
+        fs.writeFileSync(OUTPUT_SUBTITLES, correctedSrt, 'utf8');
         console.log('Subtitles generated at:', OUTPUT_SUBTITLES);
     } catch (err) {
-        console.error('Error generating subtitles using Whisper:', err);
+        console.error('Error generating subtitles using Whisper and ChatGPT:', err);
         throw err;
     }
 }
@@ -227,21 +222,21 @@ function createFinalVideo() {
 
 // Main workflow function
 async function main() {
-    // const studyText = await getTextFromStudyMaterial();
-    // if (!studyText) return;
+    const studyText = await getTextFromStudyMaterial();
+    if (!studyText) return;
 
-    // try {
-    //     await generateVoice(studyText);
-    // } catch (error) {
-    //     console.error('Failed to generate voice:', error);
-    //     return;
-    // }
-    // try {
-    //     await generateSubtitles();
-    // } catch (error) {
-    //     console.error('Failed to generate subtitles:', error);
-    //     return;
-    // }
+    try {
+        await generateVoice(studyText);
+    } catch (error) {
+        console.error('Failed to generate voice:', error);
+        return;
+    }
+    try {
+        await generateSubtitles(studyText);
+    } catch (error) {
+        console.error('Failed to generate subtitles:', error);
+        return;
+    }
     createFinalVideo();
 }
 
