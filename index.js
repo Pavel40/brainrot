@@ -174,7 +174,6 @@ async function generateSubtitles() {
     }
 }
 
-// Step 4: Merge gameplay video, generated voice, and subtitles using ffmpeg
 function createFinalVideo() {
     const videoFiles = fs.readdirSync(VIDEOS_FOLDER).filter((file) => file.endsWith('.mp4'));
     if (videoFiles.length === 0) {
@@ -182,18 +181,36 @@ function createFinalVideo() {
         return;
     }
     const inputVideoPath = path.join(VIDEOS_FOLDER, videoFiles[0]);
+    // Convert the subtitles path to forward slashes for FFmpeg.
+    const subtitlesPath = OUTPUT_SUBTITLES.replace(/\\/g, '/');
 
-    ffmpeg(inputVideoPath)
-        .outputOptions('-vf', `subtitles=${OUTPUT_SUBTITLES}`)
-        .input(OUTPUT_AUDIO)
-        .output(OUTPUT_VIDEO)
-        .on('end', () => {
-            console.log('Final video created at:', OUTPUT_VIDEO);
-        })
-        .on('error', (err) => {
-            console.error('Error creating final video:', err);
-        })
-        .run();
+    // Probe the input video to get its resolution.
+    ffmpeg.ffprobe(inputVideoPath, (err, metadata) => {
+        let width = 1920,
+            height = 1080;
+        if (!err && metadata && metadata.streams && metadata.streams[0]) {
+            width = metadata.streams[0].width || width;
+            height = metadata.streams[0].height || height;
+        }
+        // Build the video filter string.
+        // Note: original_size is set to the input video's resolution.
+        const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=36,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}'`;
+        // const vf = `subtitles='output/subtitles.srt'`;
+
+        ffmpeg(inputVideoPath)
+            .input(OUTPUT_AUDIO)
+            // Explicitly map the video from the first input and audio from the second input.
+            .outputOptions(['-shortest', '-map', '0:v', '-map', '1:a'])
+            .videoFilter(vf)
+            .output(OUTPUT_VIDEO)
+            .on('end', () => {
+                console.log('Final video created at:', OUTPUT_VIDEO);
+            })
+            .on('error', (err) => {
+                console.error('Error creating final video:', err);
+            })
+            .run();
+    });
 }
 
 // Main workflow function
