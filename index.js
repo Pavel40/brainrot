@@ -120,7 +120,7 @@ function formatTime(seconds) {
     ).padStart(3, '0')}`;
 }
 
-// Step 3: Generate subtitles using OpenAI Whisper (transcription)
+// Step 3: Generate subtitles using OpenAI Whisper (transcription) and split into smaller chunks.
 async function generateSubtitles() {
     try {
         // Use OpenAI Whisper transcription API to transcribe the generated audio.
@@ -136,11 +136,34 @@ async function generateSubtitles() {
         }
 
         let srtContent = '';
-        segments.forEach((segment, index) => {
-            const startStr = formatTime(segment.start);
-            const endStr = formatTime(segment.end);
-            const text = segment.text.trim();
-            srtContent += `${index + 1}\n${startStr} --> ${endStr}\n${text}\n\n`;
+        let subtitleIndex = 1;
+        const maxWordsPerChunk = 7; // Maximum words per subtitle chunk
+
+        segments.forEach((segment) => {
+            // Clean and split the segment text into words.
+            const words = segment.text.trim().split(/\s+/);
+            const totalWords = words.length;
+            if (totalWords === 0) return;
+
+            const segDuration = segment.end - segment.start;
+            let currentTime = segment.start;
+
+            // Process the segment in chunks of maxWordsPerChunk words.
+            for (let i = 0; i < totalWords; i += maxWordsPerChunk) {
+                const chunkWords = words.slice(i, i + maxWordsPerChunk);
+                const chunkWordCount = chunkWords.length;
+                // Proportionally allocate the chunk duration.
+                const chunkDuration = segDuration * (chunkWordCount / totalWords);
+                const chunkStart = currentTime;
+                const chunkEnd = currentTime + chunkDuration;
+                const chunkText = chunkWords.join(' ');
+
+                srtContent += `${subtitleIndex}\n${formatTime(chunkStart)} --> ${formatTime(
+                    chunkEnd
+                )}\n${chunkText}\n\n`;
+                subtitleIndex++;
+                currentTime = chunkEnd;
+            }
         });
 
         fs.writeFileSync(OUTPUT_SUBTITLES, srtContent, 'utf8');
@@ -190,7 +213,6 @@ async function main() {
         console.error('Failed to generate subtitles:', error);
         return;
     }
-    return;
     createFinalVideo();
 }
 
