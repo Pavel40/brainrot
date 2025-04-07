@@ -36,11 +36,13 @@ const openai = new OpenAI({
 async function getTextFromStudyMaterial() {
     try {
         const material = fs.readFileSync(STUDY_MATERIAL_PATH, 'utf8');
-        const prompt = `Jsi odborný copywriter specializující se na tvorbu textů pro voice-over videa. Na základě následujícího studijního materiálu vytvoř krátký, plynulý a zábavný text v češtině, který bude použit jako hlasový komentář ve videu. Ujisti se, že pokryješ všechny důležité informace obsažené ve studijním materiálu. Text by měl být informativní, poutavý a snadno srozumitelný. DŮLEŽITÉ: Prosím, piš všechna čísla slovy a nepoužívej číselné zápisy ani ordinal markery (např. místo "1." použij "první").
+        const prompt = `Jsi odborný copywriter specializující se na tvorbu textů pro voice-over videa. Na základě následujícího studijního materiálu vytvoř krátký, plynulý a zábavný text v češtině, který bude použit jako hlasový komentář ve videu. Ujisti se, že pokryješ všechny důležité informace obsažené ve studijním materiálu. Text by měl být informativní, poutavý a snadno srozumitelný. DŮLEŽITÉ: Ujisti se, že v textu se neobjeví žádné číslice. Všechna čísla, včetně letopočtů, musí být psána slovy. Například místo "1984" napiš "devatenáct set osmdesát čtyři".
 
     Studijní materiál:
     ${material}
     
+    Ujisti se, že v celém textu nejsou žádné číslice, všechna čísla musí být přepsána výhradně slovy. Zejména letopočty jako 1984 musí být napsány jako 'devatenáct set osmdesát čtyři'.
+
     Výstup:`;
 
         const response = await openai.chat.completions.create({
@@ -57,7 +59,7 @@ async function getTextFromStudyMaterial() {
         console.log(text);
 
         // remove all markdown formatting and unwanted characters, keep czech letters
-        const unwantedChars = /[^\w\s.,!?;:()čřžýáíéěóúůňďťě]/g; // Regex to match unwanted characters
+        const unwantedChars = /[^\w\s.,!?;:()čřžýáíéěóúůšňďťě]/g; // Regex to match unwanted characters
         const cleanedText = text.replace(unwantedChars, '');
 
         return cleanedText;
@@ -186,8 +188,6 @@ function createFinalVideo() {
         return;
     }
     const inputVideoPath = path.join(VIDEOS_FOLDER, videoFiles[0]);
-    // Convert the subtitles path to forward slashes for FFmpeg.
-    const subtitlesPath = OUTPUT_SUBTITLES.replace(/\\/g, '/');
 
     // Probe the input video to get its resolution.
     ffmpeg.ffprobe(inputVideoPath, (err, metadata) => {
@@ -197,14 +197,18 @@ function createFinalVideo() {
             width = metadata.streams[0].width || width;
             height = metadata.streams[0].height || height;
         }
+        // Set target resolution for smaller output.
+        const targetWidth = 1920;
+        const targetHeight = 1080;
+
         // Build the video filter string.
-        // Note: original_size is set to the input video's resolution.
-        const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=36,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}'`;
-        // const vf = `subtitles='output/subtitles.srt'`;
+        // First, burn in the subtitles using the SRT file with a forced style.
+        // Then, scale the output to the target resolution.
+        const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=36,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}',scale=${targetWidth}:${targetHeight}`;
 
         ffmpeg(inputVideoPath)
             .input(OUTPUT_AUDIO)
-            // Explicitly map the video from the first input and audio from the second input.
+            // Map video from input 0 and audio from input 1.
             .outputOptions(['-shortest', '-map', '0:v', '-map', '1:a'])
             .videoFilter(vf)
             .output(OUTPUT_VIDEO)
@@ -220,21 +224,21 @@ function createFinalVideo() {
 
 // Main workflow function
 async function main() {
-    const studyText = await getTextFromStudyMaterial();
-    if (!studyText) return;
+    // const studyText = await getTextFromStudyMaterial();
+    // if (!studyText) return;
 
-    try {
-        await generateVoice(studyText);
-    } catch (error) {
-        console.error('Failed to generate voice:', error);
-        return;
-    }
-    try {
-        await generateSubtitles();
-    } catch (error) {
-        console.error('Failed to generate subtitles:', error);
-        return;
-    }
+    // try {
+    //     await generateVoice(studyText);
+    // } catch (error) {
+    //     console.error('Failed to generate voice:', error);
+    //     return;
+    // }
+    // try {
+    //     await generateSubtitles();
+    // } catch (error) {
+    //     console.error('Failed to generate subtitles:', error);
+    //     return;
+    // }
     createFinalVideo();
 }
 
