@@ -66,13 +66,13 @@ async function generateVoice(text) {
     return new Promise((resolve, reject) => {
         const args = [
             '--text',
-            text.replace(/\n/g, ' '),
+            text,
             '--model_name',
             'tts_models/multilingual/multi-dataset/xtts_v2',
             '--language_idx',
             'cs',
-            '--speaker_idx',
-            'Viktor Menelaos',
+            '--speaker_wav',
+            'babis.wav',
             '--out_path',
             OUTPUT_AUDIO,
         ];
