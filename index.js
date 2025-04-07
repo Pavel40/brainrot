@@ -197,20 +197,23 @@ function createFinalVideo() {
             width = metadata.streams[0].width || width;
             height = metadata.streams[0].height || height;
         }
-        // Set target resolution for smaller output.
+        // Set target resolution.
         const targetWidth = 1920;
         const targetHeight = 1080;
 
-        // Build the video filter string.
-        // First, burn in the subtitles using the SRT file with a forced style.
-        // Then, scale the output to the target resolution.
-        const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=36,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}',scale=${targetWidth}:${targetHeight}`;
+        // Build the video filter chain:
+        // 1. Burn in the subtitles using the SRT file with forced style.
+        // 2. Scale to the target resolution.
+        // 3. Speed up video by a factor of 1.25.
+        const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=36,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}',scale=${targetWidth}:${targetHeight},setpts=PTS/1.25`;
 
         ffmpeg(inputVideoPath)
             .input(OUTPUT_AUDIO)
             // Map video from input 0 and audio from input 1.
             .outputOptions(['-shortest', '-map', '0:v', '-map', '1:a'])
             .videoFilter(vf)
+            // Speed up the audio by 1.25x.
+            .audioFilter('atempo=1.25')
             .output(OUTPUT_VIDEO)
             .on('end', () => {
                 console.log('Final video created at:', OUTPUT_VIDEO);
