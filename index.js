@@ -55,7 +55,12 @@ async function getTextFromStudyMaterial() {
         const text = response.choices[0].message.content.trim();
         console.log('Generated voice-over text from ChatGPT:');
         console.log(text);
-        return text;
+
+        // remove all markdown formatting and unwanted characters, keep czech letters
+        const unwantedChars = /[^\w\s.,!?;:()čřžýáíéěóúůňďťě]/g; // Regex to match unwanted characters
+        const cleanedText = text.replace(unwantedChars, '');
+
+        return cleanedText;
     } catch (err) {
         console.error('Error processing study material with ChatGPT:', err);
         return '';
