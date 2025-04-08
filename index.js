@@ -30,18 +30,42 @@ const openai = new OpenAI({
     apiKey: process.env['OPENAI_API_KEY'],
 });
 
-// Step 1: Transform study material into plain voice-over text using ChatGPT with gpt-4o-mini
+// Parse command-line arguments for video background path.
+const args = process.argv.slice(2);
+let selectedVideoPath = '';
+if (args.length > 0) {
+    // Use the provided video background path.
+    selectedVideoPath = args[0];
+    if (!fs.existsSync(selectedVideoPath)) {
+        console.error(`The specified video file does not exist: ${selectedVideoPath}`);
+        process.exit(1);
+    }
+    console.log(`Using specified video: ${selectedVideoPath}`);
+} else {
+    // Choose a random video from the videos folder.
+    const videoFiles = fs.readdirSync(VIDEOS_FOLDER).filter((file) => file.endsWith('.mp4'));
+    if (videoFiles.length === 0) {
+        console.error('No video files found in videos folder.');
+        process.exit(1);
+    }
+    const randomIndex = Math.floor(Math.random() * videoFiles.length);
+    selectedVideoPath = path.join(VIDEOS_FOLDER, videoFiles[randomIndex]);
+    console.log(`No video specified. Randomly selected video: ${selectedVideoPath}`);
+}
+
+// ---------------------------------------------------------------------------
+// Function to generate the voice-over text from study material.
 async function getTextFromStudyMaterial() {
     try {
         const material = fs.readFileSync(STUDY_MATERIAL_PATH, 'utf8');
         const prompt = `Jsi odborný copywriter specializující se na tvorbu textů pro voice-over videa. Na základě následujícího studijního materiálu vytvoř krátký, plynulý a zábavný text v češtině, který bude použit jako hlasový komentář ve videu. Ujisti se, že pokryješ všechny důležité informace obsažené ve studijním materiálu. Text by měl být informativní, poutavý a snadno srozumitelný. DŮLEŽITÉ: Ujisti se, že v textu se neobjeví žádné číslice. Všechna čísla, včetně letopočtů, musí být psána slovy. Například místo "1984" napiš "devatenáct set osmdesát čtyři".
 
-    Studijní materiál:
-    ${material}
-    
-    Ujisti se, že v celém textu nejsou žádné číslice, všechna čísla musí být přepsána výhradně slovy. Zejména letopočty jako 1984 musí být napsány jako 'devatenáct set osmdesát čtyři'.
+Studijní materiál:
+${material}
 
-    Výstup:`;
+Ujisti se, že v celém textu nejsou žádné číslice, všechna čísla musí být přepsána výhradně slovy. Zejména letopočty jako 1984 musí být napsány jako 'devatenáct set osmdesát čtyři'.
+
+Výstup:`;
 
         const response = await openai.chat.completions.create({
             model: 'gpt-4o',
@@ -56,10 +80,9 @@ async function getTextFromStudyMaterial() {
         console.log('Generated voice-over text from ChatGPT:');
         console.log(text);
 
-        // remove all markdown formatting and unwanted characters, keep czech letters
-        const unwantedChars = /[^\w\s.,!?;:()čřžýáíéěóúůšňďťě]/g; // Regex to match unwanted characters
+        // Remove all markdown formatting and unwanted characters, keep Czech letters.
+        const unwantedChars = /[^\w\s.,!?;:()čřžýáíéěóúůšňďťě]/g;
         const cleanedText = text.replace(unwantedChars, '');
-
         return cleanedText;
     } catch (err) {
         console.error('Error processing study material with ChatGPT:', err);
@@ -67,6 +90,8 @@ async function getTextFromStudyMaterial() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Function to generate TTS audio using OpenAI's text-to-speech API.
 async function generateVoice(text) {
     try {
         const mp3 = await openai.audio.speech.create({
@@ -84,6 +109,7 @@ async function generateVoice(text) {
     }
 }
 
+// ---------------------------------------------------------------------------
 // Helper: Format seconds into SRT time format "HH:MM:SS,mmm"
 function formatTime(seconds) {
     const hrs = Math.floor(seconds / 3600);
@@ -95,6 +121,8 @@ function formatTime(seconds) {
     ).padStart(3, '0')}`;
 }
 
+// ---------------------------------------------------------------------------
+// Function to generate subtitles by combining Whisper transcription and ChatGPT correction.
 async function generateSubtitles(originalVoiceoverText) {
     try {
         // Use OpenAI Whisper transcription API to transcribe the generated audio.
@@ -143,7 +171,7 @@ async function generateSubtitles(originalVoiceoverText) {
         console.log('Initial generated subtitles:\n', srtContent);
 
         // Use ChatGPT to fix nonsensical words, typos, and mistakes.
-        // The prompt compares the original voiceover text with the transcribed subtitles.
+        // Compare the original voiceover text with the transcribed subtitles.
         const fixPrompt = `Jsi expert na korektury a úpravy titulků. Níže najdeš původní text, který byl použit pro generování hlasového komentáře, a automaticky transkribované titulky, které mohou obsahovat chyby, nesmyslná slova nebo překlepy. Prosím oprav titulky tak, aby odpovídaly původnímu textu a byly jazykově správné, ale zachovej původní indexy a časové značky ve formátu SRT.
 
 Původní text pro hlasový komentář:
@@ -171,7 +199,7 @@ Opravené titulky (výstup v platném SRT formátu):`;
             .trim();
         console.log('Corrected subtitles from ChatGPT:\n', correctedSrt);
 
-        // convert to all caps
+        // Convert subtitles to all uppercase (if needed)
         correctedSrt = correctedSrt.toUpperCase();
 
         fs.writeFileSync(OUTPUT_SUBTITLES, correctedSrt, 'utf8');
@@ -182,16 +210,12 @@ Opravené titulky (výstup v platném SRT formátu):`;
     }
 }
 
-function createFinalVideo() {
-    const videoFiles = fs.readdirSync(VIDEOS_FOLDER).filter((file) => file.endsWith('.mp4'));
-    if (videoFiles.length === 0) {
-        console.error('No video files found in videos folder.');
-        return;
-    }
-    const inputVideoPath = path.join(VIDEOS_FOLDER, videoFiles[0]);
-
+// ---------------------------------------------------------------------------
+// Function to create final video, using the selected video background.
+// The output video keeps the original video size and centers the subtitles.
+function createFinalVideo(selectedVideoPath) {
     // Probe the input video to get its resolution.
-    ffmpeg.ffprobe(inputVideoPath, (err, metadata) => {
+    ffmpeg.ffprobe(selectedVideoPath, (err, metadata) => {
         if (err) {
             console.error('Error probing video:', err);
             return;
@@ -207,12 +231,14 @@ function createFinalVideo() {
 
         // Build the video filter string:
         // 1. Burn in the subtitles using the SRT file with forced style.
+        //    - Use Alignment=10 (center both horizontally and vertically).
+        //    - Use the actual video dimensions as original_size.
         // 2. Speed up video by a factor of 1.25.
         const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=22,PrimaryColour=&H0000FFFF,OutlineColour=&H000000,Outline=2,Alignment=10,original_size=${width}x${height}',setpts=PTS/1.25`;
 
-        ffmpeg(inputVideoPath)
+        ffmpeg(selectedVideoPath)
             .input(OUTPUT_AUDIO)
-            // Map video from input 0 and audio from input 1.
+            // Map video from background and audio from TTS.
             .outputOptions(['-shortest', '-map', '0:v', '-map', '1:a'])
             .videoFilter(vf)
             // Speed up the audio by 1.25x.
@@ -228,6 +254,7 @@ function createFinalVideo() {
     });
 }
 
+// ---------------------------------------------------------------------------
 // Main workflow function
 async function main() {
     const studyText = await getTextFromStudyMaterial();
@@ -245,7 +272,7 @@ async function main() {
         console.error('Failed to generate subtitles:', error);
         return;
     }
-    createFinalVideo();
+    createFinalVideo(selectedVideoPath);
 }
 
 main();
