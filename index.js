@@ -209,8 +209,6 @@ function createFinalVideo() {
 
         // Build the video filter string:
         // 1. Burn in the subtitles using the SRT file with forced style.
-        //    - Use Alignment=5 to center the subtitles.
-        //    - Use original_size from the video stream.
         // 2. Speed up video by a factor of 1.25.
         // const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}',setpts=PTS/1.25`;
         const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=22,PrimaryColour=&H0000FFFF,OutlineColour=&H000000,Outline=2,Alignment=10,original_size=${width}x${height}',setpts=PTS/1.25`;
