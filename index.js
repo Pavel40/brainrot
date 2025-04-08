@@ -46,12 +46,12 @@ async function getTextFromStudyMaterial() {
     Výstup:`;
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: 'gpt-4o',
             messages: [
                 { role: 'system', content: 'Jsi odborný copywriter pro voice-over videa.' },
                 { role: 'user', content: prompt },
             ],
-            max_tokens: 1000,
+            max_tokens: 10000,
         });
 
         const text = response.choices[0].message.content.trim();
@@ -113,7 +113,7 @@ async function generateSubtitles(originalVoiceoverText) {
 
         let srtContent = '';
         let subtitleIndex = 1;
-        const maxWordsPerChunk = 7; // Maximum words per subtitle chunk
+        const maxWordsPerChunk = 4; // Maximum words per subtitle chunk
 
         segments.forEach((segment) => {
             // Clean and split the segment text into words.
@@ -154,10 +154,10 @@ ${originalVoiceoverText}
 Automaticky generované titulky:
 ${srtContent}
 
-Odpověz pouze výstupem v platném SRT formátu. Tvůj výstup musí být pouze opravený text SRT titulků. Opravené titulky (výstup v platném SRT formátu):`;
+Opravené titulky (výstup v platném SRT formátu):`;
 
         const fixResponse = await openai.chat.completions.create({
-            model: 'gpt-4o-mini',
+            model: 'gpt-4o',
             messages: [
                 { role: 'system', content: 'Jsi odborný editor titulků.' },
                 { role: 'user', content: fixPrompt },
@@ -165,8 +165,16 @@ Odpověz pouze výstupem v platném SRT formátu. Tvůj výstup musí být pouze
             max_tokens: 10000,
         });
 
-        const correctedSrt = fixResponse.choices[0].message.content.trim();
+        let correctedSrt = fixResponse.choices[0].message.content.trim();
+        // Remove any code block markers like "```srt" and "```"
+        correctedSrt = correctedSrt
+            .replace(/```srt\s*/gi, '')
+            .replace(/```/gi, '')
+            .trim();
         console.log('Corrected subtitles from ChatGPT:\n', correctedSrt);
+
+        // convert to all caps
+        correctedSrt = correctedSrt.toUpperCase();
 
         fs.writeFileSync(OUTPUT_SUBTITLES, correctedSrt, 'utf8');
         console.log('Subtitles generated at:', OUTPUT_SUBTITLES);
@@ -186,21 +194,26 @@ function createFinalVideo() {
 
     // Probe the input video to get its resolution.
     ffmpeg.ffprobe(inputVideoPath, (err, metadata) => {
-        let width = 1920,
-            height = 1080;
-        if (!err && metadata && metadata.streams && metadata.streams[0]) {
-            width = metadata.streams[0].width || width;
-            height = metadata.streams[0].height || height;
+        if (err) {
+            console.error('Error probing video:', err);
+            return;
         }
-        // Set target resolution.
-        const targetWidth = 1920;
-        const targetHeight = 1080;
+        // Find the first video stream.
+        const videoStream = metadata.streams.find((s) => s.codec_type === 'video');
+        if (!videoStream) {
+            console.error('No video stream found in metadata.');
+            return;
+        }
+        const width = videoStream.width;
+        const height = videoStream.height;
 
-        // Build the video filter chain:
+        // Build the video filter string:
         // 1. Burn in the subtitles using the SRT file with forced style.
-        // 2. Scale to the target resolution.
-        // 3. Speed up video by a factor of 1.25.
-        const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=36,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}',scale=${targetWidth}:${targetHeight},setpts=PTS/1.25`;
+        //    - Use Alignment=5 to center the subtitles.
+        //    - Use original_size from the video stream.
+        // 2. Speed up video by a factor of 1.25.
+        // const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}',setpts=PTS/1.25`;
+        const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=22,PrimaryColour=&H0000FFFF,OutlineColour=&H000000,Outline=2,Alignment=10,original_size=${width}x${height}',setpts=PTS/1.25`;
 
         ffmpeg(inputVideoPath)
             .input(OUTPUT_AUDIO)
