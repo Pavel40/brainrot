@@ -6,7 +6,6 @@ dotenv.config();
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
 import ffmpeg from 'fluent-ffmpeg';
 import OpenAI from 'openai';
 
@@ -20,7 +19,6 @@ const VIDEOS_FOLDER = path.join(__dirname, 'videos');
 const OUTPUT_AUDIO = path.join(__dirname, 'output', 'voice.mp3');
 const OUTPUT_SUBTITLES = path.join(__dirname, 'output', 'subtitles.srt');
 const OUTPUT_VIDEO = path.join(__dirname, 'output', 'final_video.mp4');
-const LANGUAGE = 'cs'; // Czech language code
 
 // Ensure output directory exists
 if (!fs.existsSync(path.join(__dirname, 'output'))) {
@@ -210,7 +208,6 @@ function createFinalVideo() {
         // Build the video filter string:
         // 1. Burn in the subtitles using the SRT file with forced style.
         // 2. Speed up video by a factor of 1.25.
-        // const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H000000,Outline=2,Alignment=2,original_size=${width}x${height}',setpts=PTS/1.25`;
         const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=22,PrimaryColour=&H0000FFFF,OutlineColour=&H000000,Outline=2,Alignment=10,original_size=${width}x${height}',setpts=PTS/1.25`;
 
         ffmpeg(inputVideoPath)
