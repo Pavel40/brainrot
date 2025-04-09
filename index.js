@@ -137,7 +137,9 @@ function formatTime(seconds) {
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
     const ms = Math.floor((seconds - Math.floor(seconds)) * 1000);
-    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(
+        ms
+    ).padStart(3, '0')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +181,9 @@ async function generateSubtitles(originalVoiceoverText) {
                 const chunkEnd = currentTime + chunkDuration;
                 const chunkText = chunkWords.join(' ');
 
-                srtContent += `${subtitleIndex}\n${formatTime(chunkStart)} --> ${formatTime(chunkEnd)}\n${chunkText}\n\n`;
+                srtContent += `${subtitleIndex}\n${formatTime(chunkStart)} --> ${formatTime(
+                    chunkEnd
+                )}\n${chunkText}\n\n`;
                 subtitleIndex++;
                 currentTime = chunkEnd;
             }
@@ -256,7 +260,8 @@ function createFinalVideo(selectedVideoPath, bgAudioPath) {
         if (bgAudioPath) {
             // If a background audio file is provided, mix it with the TTS audio.
             // Both audio inputs are sped up by 1.25 using atempo filter.
-            const complexFilter = "[1:a]atempo=1.25,volume=1[voice];[2:a]atempo=1.25,volume=0.3[bg];[voice][bg]amix=inputs=2:duration=shortest:dropout_transition=0[mixed]";
+            const complexFilter =
+                '[1:a]atempo=1.25,volume=1[voice];[2:a]atempo=1.25,volume=0.15[bg];[voice][bg]amix=inputs=2:duration=shortest:dropout_transition=0[mixed]';
             ffmpeg(selectedVideoPath)
                 .input(OUTPUT_AUDIO)
                 .input(bgAudioPath)
