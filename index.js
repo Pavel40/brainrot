@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import ffmpeg from 'fluent-ffmpeg';
 import OpenAI from 'openai';
+import minimist from 'minimist';
 
 // Setup __dirname for ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -30,19 +31,23 @@ const openai = new OpenAI({
     apiKey: process.env['OPENAI_API_KEY'],
 });
 
-// Parse command-line arguments for video background path.
-const args = process.argv.slice(2);
-let selectedVideoPath = '';
-if (args.length > 0) {
-    // Use the provided video background path.
-    selectedVideoPath = args[0];
+// ---------------------------------------------------------------------------
+// Parse CLI options using minimist.
+const cliOptions = minimist(process.argv.slice(2), {
+    string: ['video', 'text'],
+    alias: { v: 'video', t: 'text' },
+});
+
+let selectedVideoPath;
+if (cliOptions.video) {
+    selectedVideoPath = path.resolve(cliOptions.video);
     if (!fs.existsSync(selectedVideoPath)) {
         console.error(`The specified video file does not exist: ${selectedVideoPath}`);
         process.exit(1);
     }
-    console.log(`Using specified video: ${selectedVideoPath}`);
+    console.log(`Using video background from CLI: ${selectedVideoPath}`);
 } else {
-    // Choose a random video from the videos folder.
+    // Choose a random video from the VIDEOS_FOLDER.
     const videoFiles = fs.readdirSync(VIDEOS_FOLDER).filter((file) => file.endsWith('.mp4'));
     if (videoFiles.length === 0) {
         console.error('No video files found in videos folder.');
@@ -51,6 +56,12 @@ if (args.length > 0) {
     const randomIndex = Math.floor(Math.random() * videoFiles.length);
     selectedVideoPath = path.join(VIDEOS_FOLDER, videoFiles[randomIndex]);
     console.log(`No video specified. Randomly selected video: ${selectedVideoPath}`);
+}
+
+let customText = '';
+if (cliOptions.text) {
+    customText = cliOptions.text;
+    console.log('Using custom text provided via CLI.');
 }
 
 // ---------------------------------------------------------------------------
@@ -199,7 +210,7 @@ Opravené titulky (výstup v platném SRT formátu):`;
             .trim();
         console.log('Corrected subtitles from ChatGPT:\n', correctedSrt);
 
-        // Convert subtitles to all uppercase (if needed)
+        // Convert subtitles to all uppercase.
         correctedSrt = correctedSrt.toUpperCase();
 
         fs.writeFileSync(OUTPUT_SUBTITLES, correctedSrt, 'utf8');
@@ -231,7 +242,7 @@ function createFinalVideo(selectedVideoPath) {
 
         // Build the video filter string:
         // 1. Burn in the subtitles using the SRT file with forced style.
-        //    - Use Alignment=10 (center both horizontally and vertically).
+        //    - Use Alignment=10 to center subtitles both horizontally and vertically.
         //    - Use the actual video dimensions as original_size.
         // 2. Speed up video by a factor of 1.25.
         const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=22,PrimaryColour=&H0000FFFF,OutlineColour=&H000000,Outline=2,Alignment=10,original_size=${width}x${height}',setpts=PTS/1.25`;
@@ -255,9 +266,15 @@ function createFinalVideo(selectedVideoPath) {
 }
 
 // ---------------------------------------------------------------------------
-// Main workflow function
+// Main workflow function.
 async function main() {
-    const studyText = await getTextFromStudyMaterial();
+    let studyText = '';
+    if (customText && customText.trim().length > 0) {
+        studyText = customText;
+        console.log('Using custom provided text for voice-over.');
+    } else {
+        studyText = await getTextFromStudyMaterial();
+    }
     if (!studyText) return;
 
     try {
