@@ -35,8 +35,24 @@ const openai = new OpenAI({
 // Parse CLI options using minimist.
 const cliOptions = minimist(process.argv.slice(2), {
     string: ['video', 'text', 'bg', 'lang'],
-    alias: { v: 'video', t: 'text', b: 'bg', l: 'lang' },
+    boolean: ['help'],
+    alias: { v: 'video', t: 'text', b: 'bg', l: 'lang', h: 'help' },
 });
+
+// If help option is present, display usage information and exit.
+if (cliOptions.help) {
+    console.log(`
+Usage: node index.js [options]
+
+Options:
+  --video, -v   Path to a custom video background file.
+  --text, -t    Custom voice-over text to use instead of generating from study material.
+  --bg, -b      Path to a background audio file (will be mixed at low volume).
+  --lang, -l    Language to use (default: cz). Supported values: cz, en, de.
+  --help, -h    Show this help message.
+    `);
+    process.exit(0);
+}
 
 // Language selection: default is Czech ("cz")
 let languageOption = cliOptions.lang ? cliOptions.lang.toLowerCase() : 'cz';
@@ -101,7 +117,7 @@ Output:`;
 Studienmaterial:
 ${material}
 
-Stelle sicher, dass im gesamten Text keine Ziffern vorkommen und alle Zahlen ausschrieben werden.
+Stelle sicher, dass im gesamten Text keine Ziffern vorkommen und alle Zahlen ausgeschrieben werden.
 Ausgabe:`;
         } else {
             // Default: Czech
@@ -136,7 +152,7 @@ Výstup:`;
         console.log('Generated voice-over text from ChatGPT:');
         console.log(text);
 
-        // Remove all markdown formatting and unwanted characters, keeping letters (both Czech and basic Latin).
+        // Remove all markdown formatting and unwanted characters, keeping Czech letters and basic Latin letters.
         const unwantedChars = /[^\w\s.,!?;:()čřžýáíéěóúůšňďťěA-Za-z]/g;
         const cleanedText = text.replace(unwantedChars, '');
         return cleanedText;
