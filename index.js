@@ -34,10 +34,15 @@ const openai = new OpenAI({
 // ---------------------------------------------------------------------------
 // Parse CLI options using minimist.
 const cliOptions = minimist(process.argv.slice(2), {
-    string: ['video', 'text', 'bg'],
-    alias: { v: 'video', t: 'text', b: 'bg' },
+    string: ['video', 'text', 'bg', 'lang'],
+    alias: { v: 'video', t: 'text', b: 'bg', l: 'lang' },
 });
 
+// Language selection: default is Czech ("cz")
+let languageOption = cliOptions.lang ? cliOptions.lang.toLowerCase() : 'cz';
+console.log(`Language set to: ${languageOption}`);
+
+// Video background selection.
 let selectedVideoPath;
 if (cliOptions.video) {
     selectedVideoPath = path.resolve(cliOptions.video);
@@ -58,12 +63,14 @@ if (cliOptions.video) {
     console.log(`No video specified. Randomly selected video: ${selectedVideoPath}`);
 }
 
+// Custom text selection.
 let customText = '';
 if (cliOptions.text) {
     customText = cliOptions.text;
     console.log('Using custom text provided via CLI.');
 }
 
+// Background audio selection.
 let bgAudioPath = '';
 if (cliOptions.bg) {
     bgAudioPath = path.resolve(cliOptions.bg);
@@ -79,7 +86,26 @@ if (cliOptions.bg) {
 async function getTextFromStudyMaterial() {
     try {
         const material = fs.readFileSync(STUDY_MATERIAL_PATH, 'utf8');
-        const prompt = `Jsi odborný copywriter specializující se na tvorbu textů pro voice-over videa. Na základě následujícího studijního materiálu vytvoř krátký, plynulý a zábavný text v češtině, který bude použit jako hlasový komentář ve videu. Ujisti se, že pokryješ všechny důležité informace obsažené ve studijním materiálu. Text by měl být informativní, poutavý a snadno srozumitelný. DŮLEŽITÉ: Ujisti se, že v textu se neobjeví žádné číslice. Všechna čísla, včetně letopočtů, musí být psána slovy. Například místo "1984" napiš "devatenáct set osmdesát čtyři".
+        let prompt = '';
+        if (languageOption === 'en') {
+            prompt = `You are a professional copywriter specializing in writing scripts for voice-over videos. Based on the following study material, create a short, fluent, and entertaining text in English that will be used as the voice-over commentary in a video. Make sure to cover all important information from the study material. The text should be informative, engaging, and easy to understand. IMPORTANT: Make sure that no digits appear in the text. All numbers, including years, must be written in words. For example, instead of "1984", write "nineteen eighty-four".
+
+Study material:
+${material}
+
+Ensure there are no digits anywhere in the text; all numbers must be written in words.
+Output:`;
+        } else if (languageOption === 'de' || languageOption === 'german') {
+            prompt = `Du bist ein professioneller Werbetexter, der sich auf das Schreiben von Skripten für Voice-Over-Videos spezialisiert hat. Basierend auf dem folgenden Studienmaterial erstelle einen kurzen, fließenden und unterhaltsamen Text in deutscher Sprache, der als Kommentar in einem Video verwendet wird. Achte darauf, alle wichtigen Informationen des Studienmaterials einzubeziehen. Der Text soll informativ, ansprechend und leicht verständlich sein. WICHTIG: Stelle sicher, dass keine Ziffern im Text vorkommen. Alle Zahlen, einschließlich Jahreszahlen, müssen ausgeschrieben werden. Zum Beispiel, statt "1984" schreibe "neunzehnhundertvierundachtzig".
+
+Studienmaterial:
+${material}
+
+Stelle sicher, dass im gesamten Text keine Ziffern vorkommen und alle Zahlen ausschrieben werden.
+Ausgabe:`;
+        } else {
+            // Default: Czech
+            prompt = `Jsi odborný copywriter specializující se na tvorbu textů pro voice-over videa. Na základě následujícího studijního materiálu vytvoř krátký, plynulý a zábavný text v češtině, který bude použit jako hlasový komentář ve videu. Ujisti se, že pokryješ všechny důležité informace obsažené ve studijním materiálu. Text by měl být informativní, poutavý a snadno srozumitelný. DŮLEŽITÉ: Ujisti se, že v textu se neobjeví žádné číslice. Všechna čísla, včetně letopočtů, musí být psána slovy. Například místo "1984" napiš "devatenáct set osmdesát čtyři".
 
 Studijní materiál:
 ${material}
@@ -87,11 +113,20 @@ ${material}
 Ujisti se, že v celém textu nejsou žádné číslice, všechna čísla musí být přepsána výhradně slovy. Zejména letopočty jako 1984 musí být napsány jako 'devatenáct set osmdesát čtyři'.
 
 Výstup:`;
+        }
 
         const response = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages: [
-                { role: 'system', content: 'Jsi odborný copywriter pro voice-over videa.' },
+                {
+                    role: 'system',
+                    content:
+                        languageOption === 'en'
+                            ? 'You are a professional copywriter for voice-over videos.'
+                            : languageOption === 'de' || languageOption === 'german'
+                            ? 'Du bist ein professioneller Werbetexter für Voice-Over-Videos.'
+                            : 'Jsi odborný copywriter pro voice-over videa.',
+                },
                 { role: 'user', content: prompt },
             ],
             max_tokens: 10000,
@@ -101,8 +136,8 @@ Výstup:`;
         console.log('Generated voice-over text from ChatGPT:');
         console.log(text);
 
-        // Remove all markdown formatting and unwanted characters, keep Czech letters.
-        const unwantedChars = /[^\w\s.,!?;:()čřžýáíéěóúůšňďťě]/g;
+        // Remove all markdown formatting and unwanted characters, keeping letters (both Czech and basic Latin).
+        const unwantedChars = /[^\w\s.,!?;:()čřžýáíéěóúůšňďťěA-Za-z]/g;
         const cleanedText = text.replace(unwantedChars, '');
         return cleanedText;
     } catch (err) {
@@ -115,11 +150,19 @@ Výstup:`;
 // Function to generate TTS audio using OpenAI's text-to-speech API.
 async function generateVoice(text) {
     try {
+        let voiceInstructions;
+        if (languageOption === 'en') {
+            voiceInstructions = 'Speak in a natural and clear English tone.';
+        } else if (languageOption === 'de' || languageOption === 'german') {
+            voiceInstructions = 'Speak in a natural and clear German tone.';
+        } else {
+            voiceInstructions = 'Speak in a natural and clear Czech tone.';
+        }
         const mp3 = await openai.audio.speech.create({
             model: 'gpt-4o-mini-tts',
             voice: 'coral',
             input: text,
-            instructions: 'Speak in a natural and clear Czech tone.',
+            instructions: voiceInstructions,
         });
         const buffer = Buffer.from(await mp3.arrayBuffer());
         await fs.promises.writeFile(OUTPUT_AUDIO, buffer);
@@ -191,9 +234,31 @@ async function generateSubtitles(originalVoiceoverText) {
 
         console.log('Initial generated subtitles:\n', srtContent);
 
-        // Use ChatGPT to fix nonsensical words, typos, and mistakes.
-        // Compare the original voiceover text with the transcribed subtitles.
-        const fixPrompt = `Jsi expert na korektury a úpravy titulků. Níže najdeš původní text, který byl použit pro generování hlasového komentáře, a automaticky transkribované titulky, které mohou obsahovat chyby, nesmyslná slova nebo překlepy. Prosím oprav titulky tak, aby odpovídaly původnímu textu a byly jazykově správné, ale zachovej původní indexy a časové značky ve formátu SRT.
+        // Build the fix prompt according to the selected language.
+        let fixPrompt = '';
+        if (languageOption === 'en') {
+            fixPrompt = `You are an expert in editing subtitles. Below is the original text used for generating the voice-over, and the automatically transcribed subtitles which may contain errors, typos, or nonsensical words. Please fix the subtitles so that they accurately reflect the original text and are grammatically correct, while preserving the original indices and time codes in valid SRT format.
+
+Original text for the voice-over:
+${originalVoiceoverText}
+
+Automatically generated subtitles:
+${srtContent}
+
+Provide only the corrected subtitles in valid SRT format:`;
+        } else if (languageOption === 'de' || languageOption === 'german') {
+            fixPrompt = `Du bist ein Experte für die Bearbeitung von Untertiteln. Unten findest du den Originaltext, der für die Erstellung des Voice-over verwendet wurde, und die automatisch transkribierten Untertitel, die Fehler, Tippfehler oder unsinnige Wörter enthalten können. Bitte korrigiere die Untertitel so, dass sie dem Originaltext genau entsprechen und grammatikalisch korrekt sind, wobei die ursprünglichen Indizes und Zeitcodes im gültigen SRT-Format erhalten bleiben.
+
+Originaltext für das Voice-over:
+${originalVoiceoverText}
+
+Automatisch generierte Untertitel:
+${srtContent}
+
+Gib nur die korrigierten Untertitel im gültigen SRT-Format aus:`;
+        } else {
+            // Default: Czech
+            fixPrompt = `Jsi expert na korektury a úpravy titulků. Níže najdeš původní text, který byl použit pro generování hlasového komentáře, a automaticky transkribované titulky, které mohou obsahovat chyby, překlepy nebo nesmyslná slova. Prosím oprav titulky tak, aby odpovídaly původnímu textu a byly jazykově správné, ale zachovej původní indexy a časové značky ve formátu SRT.
 
 Původní text pro hlasový komentář:
 ${originalVoiceoverText}
@@ -201,12 +266,21 @@ ${originalVoiceoverText}
 Automaticky generované titulky:
 ${srtContent}
 
-Opravené titulky (výstup v platném SRT formátu):`;
+Odpověz pouze opravenými titulky (výstup v platném SRT formátu):`;
+        }
 
         const fixResponse = await openai.chat.completions.create({
             model: 'gpt-4o',
             messages: [
-                { role: 'system', content: 'Jsi odborný editor titulků.' },
+                {
+                    role: 'system',
+                    content:
+                        languageOption === 'en'
+                            ? 'You are an expert subtitle editor.'
+                            : languageOption === 'de' || languageOption === 'german'
+                            ? 'Du bist ein Experte für Untertitel.'
+                            : 'Jsi odborný editor titulků.',
+                },
                 { role: 'user', content: fixPrompt },
             ],
             max_tokens: 10000,
@@ -232,7 +306,7 @@ Opravené titulky (výstup v platném SRT formátu):`;
 }
 
 // ---------------------------------------------------------------------------
-// Function to create final video, using the selected video background.
+// Function to create final video, using the selected video background and optional background audio.
 // The output video keeps the original video size and centers the subtitles.
 function createFinalVideo(selectedVideoPath, bgAudioPath) {
     // Probe the input video to get its resolution.
