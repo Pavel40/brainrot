@@ -34,8 +34,8 @@ const openai = new OpenAI({
 // ---------------------------------------------------------------------------
 // Parse CLI options using minimist.
 const cliOptions = minimist(process.argv.slice(2), {
-    string: ['video', 'text'],
-    alias: { v: 'video', t: 'text' },
+    string: ['video', 'text', 'bg'],
+    alias: { v: 'video', t: 'text', b: 'bg' },
 });
 
 let selectedVideoPath;
@@ -62,6 +62,16 @@ let customText = '';
 if (cliOptions.text) {
     customText = cliOptions.text;
     console.log('Using custom text provided via CLI.');
+}
+
+let bgAudioPath = '';
+if (cliOptions.bg) {
+    bgAudioPath = path.resolve(cliOptions.bg);
+    if (!fs.existsSync(bgAudioPath)) {
+        console.error(`The specified background audio file does not exist: ${bgAudioPath}`);
+        process.exit(1);
+    }
+    console.log(`Using background audio from CLI: ${bgAudioPath}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -127,9 +137,7 @@ function formatTime(seconds) {
     const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
     const ms = Math.floor((seconds - Math.floor(seconds)) * 1000);
-    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(
-        ms
-    ).padStart(3, '0')}`;
+    return `${String(hrs).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,9 +179,7 @@ async function generateSubtitles(originalVoiceoverText) {
                 const chunkEnd = currentTime + chunkDuration;
                 const chunkText = chunkWords.join(' ');
 
-                srtContent += `${subtitleIndex}\n${formatTime(chunkStart)} --> ${formatTime(
-                    chunkEnd
-                )}\n${chunkText}\n\n`;
+                srtContent += `${subtitleIndex}\n${formatTime(chunkStart)} --> ${formatTime(chunkEnd)}\n${chunkText}\n\n`;
                 subtitleIndex++;
                 currentTime = chunkEnd;
             }
@@ -224,7 +230,7 @@ Opravené titulky (výstup v platném SRT formátu):`;
 // ---------------------------------------------------------------------------
 // Function to create final video, using the selected video background.
 // The output video keeps the original video size and centers the subtitles.
-function createFinalVideo(selectedVideoPath) {
+function createFinalVideo(selectedVideoPath, bgAudioPath) {
     // Probe the input video to get its resolution.
     ffmpeg.ffprobe(selectedVideoPath, (err, metadata) => {
         if (err) {
@@ -247,21 +253,42 @@ function createFinalVideo(selectedVideoPath) {
         // 2. Speed up video by a factor of 1.25.
         const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=22,PrimaryColour=&H0000FFFF,OutlineColour=&H000000,Outline=2,Alignment=10,original_size=${width}x${height}',setpts=PTS/1.25`;
 
-        ffmpeg(selectedVideoPath)
-            .input(OUTPUT_AUDIO)
-            // Map video from background and audio from TTS.
-            .outputOptions(['-shortest', '-map', '0:v', '-map', '1:a'])
-            .videoFilter(vf)
-            // Speed up the audio by 1.25x.
-            .audioFilter('atempo=1.25')
-            .output(OUTPUT_VIDEO)
-            .on('end', () => {
-                console.log('Final video created at:', OUTPUT_VIDEO);
-            })
-            .on('error', (err) => {
-                console.error('Error creating final video:', err);
-            })
-            .run();
+        if (bgAudioPath) {
+            // If a background audio file is provided, mix it with the TTS audio.
+            // Both audio inputs are sped up by 1.25 using atempo filter.
+            const complexFilter = "[1:a]atempo=1.25,volume=1[voice];[2:a]atempo=1.25,volume=0.3[bg];[voice][bg]amix=inputs=2:duration=shortest:dropout_transition=0[mixed]";
+            ffmpeg(selectedVideoPath)
+                .input(OUTPUT_AUDIO)
+                .input(bgAudioPath)
+                .complexFilter(complexFilter)
+                .outputOptions(['-shortest', '-map', '0:v', '-map', '[mixed]'])
+                .videoFilter(vf)
+                .output(OUTPUT_VIDEO)
+                .on('end', () => {
+                    console.log('Final video created at:', OUTPUT_VIDEO);
+                })
+                .on('error', (err) => {
+                    console.error('Error creating final video:', err);
+                })
+                .run();
+        } else {
+            // No background audio provided: use TTS audio only.
+            ffmpeg(selectedVideoPath)
+                .input(OUTPUT_AUDIO)
+                // Map video from background and audio from TTS.
+                .outputOptions(['-shortest', '-map', '0:v', '-map', '1:a'])
+                .videoFilter(vf)
+                // Speed up the audio by 1.25x.
+                .audioFilter('atempo=1.25')
+                .output(OUTPUT_VIDEO)
+                .on('end', () => {
+                    console.log('Final video created at:', OUTPUT_VIDEO);
+                })
+                .on('error', (err) => {
+                    console.error('Error creating final video:', err);
+                })
+                .run();
+        }
     });
 }
 
@@ -289,7 +316,7 @@ async function main() {
         console.error('Failed to generate subtitles:', error);
         return;
     }
-    createFinalVideo(selectedVideoPath);
+    createFinalVideo(selectedVideoPath, bgAudioPath);
 }
 
 main();
