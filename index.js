@@ -321,9 +321,6 @@ Odpověz pouze opravenými titulky (výstup v platném SRT formátu):`;
     }
 }
 
-// ---------------------------------------------------------------------------
-// Function to create final video, using the selected video background and optional background audio.
-// The output video keeps the original video size and centers the subtitles.
 function createFinalVideo(selectedVideoPath, bgAudioPath) {
     // Probe the input video to get its resolution.
     ffmpeg.ffprobe(selectedVideoPath, (err, metadata) => {
@@ -348,12 +345,19 @@ function createFinalVideo(selectedVideoPath, bgAudioPath) {
         const vf = `subtitles='output/subtitles.srt':force_style='FontName=Comic Sans MS,FontSize=22,PrimaryColour=&H0000FFFF,OutlineColour=&H000000,Outline=2,Alignment=10,original_size=${width}x${height}',setpts=PTS/1.25`;
 
         if (bgAudioPath) {
-            // If a background audio file is provided, mix it with the TTS audio.
-            // Both audio inputs are sped up by 1.25 using atempo filter.
+            // With a background audio file, mix it with the TTS audio.
+            // Both audio inputs are sped up by 1.25 via atempo filter.
+            // Note: Since we now have three inputs, the indexing is:
+            // [0] video (looped), [1] TTS audio, [2] background audio.
             const complexFilter =
                 '[1:a]atempo=1.25,volume=1[voice];[2:a]atempo=1.25,volume=0.15[bg];[voice][bg]amix=inputs=2:duration=shortest:dropout_transition=0[mixed]';
-            ffmpeg(selectedVideoPath)
+            ffmpeg()
+                // First input: Video (looped).
+                .input(selectedVideoPath)
+                .inputOptions(['-stream_loop', '-1'])
+                // Second input: TTS audio.
                 .input(OUTPUT_AUDIO)
+                // Third input: Background audio.
                 .input(bgAudioPath)
                 .complexFilter(complexFilter)
                 .outputOptions(['-shortest', '-map', '0:v', '-map', '[mixed]'])
@@ -368,12 +372,15 @@ function createFinalVideo(selectedVideoPath, bgAudioPath) {
                 .run();
         } else {
             // No background audio provided: use TTS audio only.
-            ffmpeg(selectedVideoPath)
+            ffmpeg()
+                // First input: Video (looped).
+                .input(selectedVideoPath)
+                .inputOptions(['-stream_loop', '-1'])
+                // Second input: TTS audio.
                 .input(OUTPUT_AUDIO)
-                // Map video from background and audio from TTS.
                 .outputOptions(['-shortest', '-map', '0:v', '-map', '1:a'])
                 .videoFilter(vf)
-                // Speed up the audio by 1.25x.
+                // Speed up audio by 1.25x.
                 .audioFilter('atempo=1.25')
                 .output(OUTPUT_VIDEO)
                 .on('end', () => {
